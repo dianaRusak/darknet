@@ -8,6 +8,8 @@
 #include "image.h"
 #include "demo.h"
 #include "darknet.h"
+#include "image_opencv.h"
+
 #ifdef WIN32
 #include <time.h>
 #include "gettimeofday.h"
@@ -116,6 +118,7 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     demo_thresh = thresh;
     demo_ext_output = ext_output;
     demo_json_port = json_port;
+    int flag_video = 0;
     printf("Demo\n");
     net = parse_network_cfg_custom(cfgfile, 1, 1);    // set batch=1
     if(weightfile){
@@ -129,9 +132,11 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     if(filename){
         printf("video file: %s\n", filename);
         cap = get_capture_video_stream(filename);
+        flag_video = 1;
     }else{
         printf("Webcam index: %d\n", cam_index);
         cap = get_capture_webcam(cam_index);
+        flag_video = 0;
     }
 
     if (!cap) {
@@ -182,7 +187,6 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
         create_window_cv("Demo", full_screen, 1352, 1013);
     }
 
-
     write_cv* output_video_writer = NULL;
     if (out_filename && !flag_exit)
     {
@@ -207,14 +211,20 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     float avg_fps = 0;
     int frame_counter = 0;
     int flag_pause = 0;
+    //int flag_rewind_video = 0;
+    
     while(1){
+        //count += flag_rewind_video == 0;
+        //printf("\n%d\n", count);
         ++count;
         {
             if (flag_pause != 0) {
+                printf("\nOn pause\n");
                 int c = wait_key_cv(1);
                 flag_pause = c != 32;
                 continue;
             }
+
             const float nms = .45;    // 0.4F
             int local_nboxes = nboxes;
             detection *local_dets = dets;
@@ -255,10 +265,23 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
 
             printf("\nFPS:%.1f \t AVG_FPS:%.1f\n", fps, avg_fps);
 
-            if(!prefix){
+            if (!prefix) {
                 if (!dont_show) {
                     show_image_mat(show_img, "Demo");
                     int c = wait_key_cv(1);
+                    if (c != -1) {
+                        printf("\nPress key: %d\n", c);
+                    }
+
+                    if (c == 32) {
+                        if (flag_pause) {
+                            flag_pause = 0;
+                        }
+                        else {
+                            flag_pause = 1;
+                        }
+                    }
+
                     if (c == 10) {
                         if (frame_skip == 0) frame_skip = 60;
                         else if (frame_skip == 4) frame_skip = 0;
@@ -269,12 +292,51 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
                     {
                         flag_exit = 1;
                     }
-                    flag_pause = c == 32;
+                    else if (flag_video == 1) {
+                        double curr_pos_msec = get_capture_property_cv(cap, 0);
+                        int pos = 0;
+                        switch (c) {
+                            case 65:
+                            case 97:
+                            case 212:
+                            case 244: {
+                                pos = -5000;
+                                break;
+                            }
+                            case 83:
+                            case 115:
+                            case 219:
+                            case 251: {
+                                pos = -1000;
+                                break;
+                            }
+                            case 68:
+                            case 100:
+                            case 194:
+                            case 226: {
+                                pos = 1000;
+                                break;
+                            }
+                            case 70:
+                            case 102:
+                            case 192:
+                            case 224: {
+                                pos = 5000;
+                                break;
+                            }
+                        }
+                        if (pos != 0) {
+                            Sleep(20);
+                            set_capture_property_cv(cap, 0, max(0, curr_pos_msec + pos));
+                            
+                        }
+                    }
                 }
-            }else{
+            } 
+            else {
                 char buff[256];
                 sprintf(buff, "%s_%08d.jpg", prefix, count);
-                if(show_img) save_cv_jpg(show_img, buff);
+                if (show_img) save_cv_jpg(show_img, buff);
             }
 
             // if you run it with param -mjpeg_port 8090  then open URL in your web-browser: http://localhost:8090
