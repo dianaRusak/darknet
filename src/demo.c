@@ -158,7 +158,6 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
         exit(0);
     }
 
-
     flag_exit = 0;
 
     pthread_t fetch_thread;
@@ -211,27 +210,86 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     float avg_fps = 0;
     int frame_counter = 0;
     int flag_pause = 0;
-    //int flag_rewind_video = 0;
+    int flag_need_rewind = 0;
     
     while(1){
-        //count += flag_rewind_video == 0;
-        //printf("\n%d\n", count);
+        double curr_pos_msec = 0;
+        flag_need_rewind = 0;
+        int pos = 0;
         ++count;
         {
-            if (flag_pause != 0) {
-                printf("\nOn pause\n");
-                int c = wait_key_cv(1);
-                flag_pause = c != 32;
-                continue;
+            int c = wait_key_cv(1);
+            if (c != -1) {
+                printf("\nPress key: %d\n", c);
+            }
+            if (c == 10) {
+                if (frame_skip == 0) frame_skip = 60;
+                else if (frame_skip == 4) frame_skip = 0;
+                else if (frame_skip == 60) frame_skip = 4;
+                else frame_skip = 0;
+            }
+            if (c == 27 || c == 1048603) // ESC - exit (OpenCV 2.x / 3.x)
+            {
+                flag_exit = 1;
+            }
+            if (flag_video == 1) {
+                if (c == 32) {
+                    if (flag_pause) {
+                        flag_pause = 0;
+                    }
+                    else {
+                        flag_pause = 1;
+                    }
+                }
+                curr_pos_msec = get_capture_property_cv(cap, 0);
+                pos = 0;
+                switch (c) {
+                case 65:
+                case 97:
+                case 212:
+                case 244: {
+                    pos = -5000;
+                    break;
+                }
+                case 83:
+                case 115:
+                case 219:
+                case 251: {
+                    pos = -1000;
+                    break;
+                }
+                case 68:
+                case 100:
+                case 194:
+                case 226: {
+                    pos = 1000;
+                    break;
+                }
+                case 70:
+                case 102:
+                case 192:
+                case 224: {
+                    pos = 5000;
+                    break;
+                }
+                }
+                if (pos != 0) {
+                    flag_need_rewind = 1;
+                    Sleep(20);
+                    set_capture_property_cv(cap, 0, max(0, curr_pos_msec + pos));
+                }
             }
 
+            if (flag_pause == 1 && flag_exit == 0 && flag_need_rewind == 0) {
+                continue;
+            }
             const float nms = .45;    // 0.4F
             int local_nboxes = nboxes;
             detection *local_dets = dets;
 
             if (!benchmark) if (pthread_create(&fetch_thread, 0, fetch_in_thread, 0)) error("Thread creation failed");
             if(pthread_create(&detect_thread, 0, detect_in_thread, 0)) error("Thread creation failed");
-
+            
             //if (nms) do_nms_obj(local_dets, local_nboxes, l.classes, nms);    // bad results
             if (nms) {
                 if (l.nms_kind == DEFAULT_NMS) do_nms_sort(local_dets, local_nboxes, l.classes, nms);
@@ -268,69 +326,6 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
             if (!prefix) {
                 if (!dont_show) {
                     show_image_mat(show_img, "Demo");
-                    int c = wait_key_cv(1);
-                    if (c != -1) {
-                        printf("\nPress key: %d\n", c);
-                    }
-
-                    if (c == 32) {
-                        if (flag_pause) {
-                            flag_pause = 0;
-                        }
-                        else {
-                            flag_pause = 1;
-                        }
-                    }
-
-                    if (c == 10) {
-                        if (frame_skip == 0) frame_skip = 60;
-                        else if (frame_skip == 4) frame_skip = 0;
-                        else if (frame_skip == 60) frame_skip = 4;
-                        else frame_skip = 0;
-                    }
-                    else if (c == 27 || c == 1048603) // ESC - exit (OpenCV 2.x / 3.x)
-                    {
-                        flag_exit = 1;
-                    }
-                    else if (flag_video == 1) {
-                        double curr_pos_msec = get_capture_property_cv(cap, 0);
-                        int pos = 0;
-                        switch (c) {
-                            case 65:
-                            case 97:
-                            case 212:
-                            case 244: {
-                                pos = -5000;
-                                break;
-                            }
-                            case 83:
-                            case 115:
-                            case 219:
-                            case 251: {
-                                pos = -1000;
-                                break;
-                            }
-                            case 68:
-                            case 100:
-                            case 194:
-                            case 226: {
-                                pos = 1000;
-                                break;
-                            }
-                            case 70:
-                            case 102:
-                            case 192:
-                            case 224: {
-                                pos = 5000;
-                                break;
-                            }
-                        }
-                        if (pos != 0) {
-                            Sleep(20);
-                            set_capture_property_cv(cap, 0, max(0, curr_pos_msec + pos));
-                            
-                        }
-                    }
                 }
             } 
             else {
