@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "darknet.h"
 #include "network.h"
 #include "region_layer.h"
@@ -392,6 +393,8 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     pthread_join(load_thread, 0);
     free_data(buffer);
 
+    free_load_threads(&args);
+
     free(base);
     free(paths);
     free_list_contents(plist);
@@ -422,7 +425,9 @@ static int get_coco_image_id(char *filename)
 static void print_cocos(FILE *fp, char *image_path, detection *dets, int num_boxes, int classes, int w, int h)
 {
     int i, j;
-    int image_id = get_coco_image_id(image_path);
+    //int image_id = get_coco_image_id(image_path);
+    char *p = basecfg(image_path);
+    int image_id = atoi(p);
     for (i = 0; i < num_boxes; ++i) {
         float xmin = dets[i].bbox.x - dets[i].bbox.w / 2.;
         float xmax = dets[i].bbox.x + dets[i].bbox.w / 2.;
@@ -440,7 +445,12 @@ static void print_cocos(FILE *fp, char *image_path, detection *dets, int num_box
         float bh = ymax - ymin;
 
         for (j = 0; j < classes; ++j) {
-            if (dets[i].prob[j] > 0) fprintf(fp, "{\"image_id\":%d, \"category_id\":%d, \"bbox\":[%f, %f, %f, %f], \"score\":%f},\n", image_id, coco_ids[j], bx, by, bw, bh, dets[i].prob[j]);
+            if (dets[i].prob[j] > 0) {
+                char buff[1024];
+                sprintf(buff, "{\"image_id\":%d, \"category_id\":%d, \"bbox\":[%f, %f, %f, %f], \"score\":%f},\n", image_id, coco_ids[j], bx, by, bw, bh, dets[i].prob[j]);
+                fprintf(fp, buff);
+                //printf("%s", buff);
+            }
         }
     }
 }
@@ -603,6 +613,8 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
         load_weights(&net, weightfile);
     }
     //set_batch_network(&net, 1);
+    fuse_conv_batchnorm(net);
+    calculate_binary_weights(net);
     fprintf(stderr, "Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
     srand(time(0));
 
@@ -666,7 +678,7 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     int i = 0;
     int t;
 
-    float thresh = .005;
+    float thresh = .001;
     float nms = .45;
 
     int nthreads = 4;
@@ -1369,6 +1381,9 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
     int number_of_images = plist->size;
     char **paths = (char **)list_to_array(plist);
 
+    int classes = option_find_int(options, "classes", 1);
+    int* counter_per_class = (int*)xcalloc(classes, sizeof(int));
+
     srand(time(0));
     int number_of_boxes = 0;
     printf(" read labels from %d images \n", number_of_images);
@@ -1395,6 +1410,12 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
                 system(buff);
                 if (check_mistakes) getchar();
             }
+            if (truth[j].id >= classes) {
+                classes = truth[j].id + 1;
+                counter_per_class = (int*)xrealloc(counter_per_class, classes * sizeof(int));
+            }
+            counter_per_class[truth[j].id]++;
+
             number_of_boxes++;
             rel_width_height_array = (float*)xrealloc(rel_width_height_array, 2 * number_of_boxes * sizeof(float));
 
@@ -1461,10 +1482,33 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
         }
         else avg_iou += best_iou;
     }
+
+    char buff[1024];
+    FILE* fwc = fopen("counters_per_class.txt", "wb");
+    if (fwc) {
+        sprintf(buff, "counters_per_class = ");
+        printf("\n%s", buff);
+        fwrite(buff, sizeof(char), strlen(buff), fwc);
+        for (i = 0; i < classes; ++i) {
+            sprintf(buff, "%d", counter_per_class[i]);
+            printf("%s", buff);
+            fwrite(buff, sizeof(char), strlen(buff), fwc);
+            if (i < classes - 1) {
+                fwrite(", ", sizeof(char), 2, fwc);
+                printf(", ");
+            }
+        }
+        printf("\n");
+        fclose(fwc);
+    }
+    else {
+        printf(" Error: file counters_per_class.txt can't be open \n");
+    }
+
     avg_iou = 100 * avg_iou / number_of_boxes;
     printf("\n avg IoU = %2.2f %% \n", avg_iou);
 
-    char buff[1024];
+
     FILE* fw = fopen("anchors.txt", "wb");
     if (fw) {
         printf("\nSaving anchors to the file: anchors.txt \n");
@@ -1494,6 +1538,7 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
 #endif // OPENCV
     }
     free(rel_width_height_array);
+    free(counter_per_class);
 
     getchar();
 }
