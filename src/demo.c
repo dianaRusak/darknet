@@ -8,13 +8,16 @@
 #include "image.h"
 #include "demo.h"
 #include "darknet.h"
+#include "image_opencv.h"
+
+
 #ifdef WIN32
 #include <time.h>
 #include "gettimeofday.h"
 #else
 #include <sys/time.h>
+#include <windows.h>
 #endif
-
 #ifdef OPENCV
 
 #include "http_stream.h"
@@ -38,6 +41,7 @@ static long long int frame_id = 0;
 static int demo_json_port = -1;
 
 #define NFRAMES 3
+#define CAP_PROP_POS_MSEC 0
 
 static float* predictions[NFRAMES];
 static int demo_index = 0;
@@ -151,6 +155,7 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     demo_thresh = thresh;
     demo_ext_output = ext_output;
     demo_json_port = json_port;
+    int flag_video = 0;
     printf("Demo\n");
     net = parse_network_cfg_custom(cfgfile, 1, 1);    // set batch=1
     if(weightfile){
@@ -164,9 +169,11 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     if(filename){
         printf("video file: %s\n", filename);
         cap = get_capture_video_stream(filename);
+        flag_video = 1;
     }else{
         printf("Webcam index: %d\n", cam_index);
         cap = get_capture_webcam(cam_index);
+        flag_video = 0;
     }
 
     if (!cap) {
@@ -243,12 +250,73 @@ void demo(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     float avg_fps = 0;
     int frame_counter = 0;
     int flag_pause = 0;
+    int flag_need_rewind = 0;
+    int pos = 0;
+
     while(1){
         ++count;
         {
-            if (flag_pause != 0) {
-                int c = wait_key_cv(1);
-                flag_pause = c != 32;
+            double curr_pos_msec = 0;
+            flag_need_rewind = 0;
+            pos = 0;
+            int c = wait_key_cv(1);
+            if (c != -1) {
+                printf("\nPress key: %d\n", c);
+            }
+            if (c == 10) {
+                if (frame_skip == 0) frame_skip = 60;
+                else if (frame_skip == 4) frame_skip = 0;
+                else if (frame_skip == 60) frame_skip = 4;
+                else frame_skip = 0;
+            }
+            if (c == 27 || c == 1048603) // ESC - exit (OpenCV 2.x / 3.x)
+            {
+                flag_exit = 1;
+            }
+            if (flag_video) {
+                if (c == 32) {
+                    flag_pause = !flag_pause;
+                }
+                curr_pos_msec = get_capture_property_cv(cap, CAP_PROP_POS_MSEC);
+                pos = 0;
+                switch (c) {
+                case 65:
+                case 97:
+                case 212:
+                case 244: {
+                    pos = -5000;
+                    break;
+                }
+                case 83:
+                case 115:
+                case 219:
+                case 251: {
+                    pos = -1000;
+                    break;
+                }
+                case 68:
+                case 100:
+                case 194:
+                case 226: {
+                    pos = 1000;
+                    break;
+                }
+                case 70:
+                case 102:
+                case 192:
+                case 224: {
+                    pos = 5000;
+                    break;
+                }
+                }
+                if (pos != 0) {
+                    flag_need_rewind = 1;
+                    Sleep(10);
+                    set_capture_property_cv(cap, 0, max(0, curr_pos_msec + pos));
+                }
+            }
+
+            if (flag_pause && !flag_exit && !flag_need_rewind) {
                 continue;
             }
             const float nms = .45;    // 0.4F
